@@ -1,5 +1,62 @@
 describe('Calculator', function() {
 
+    describe('with tasks', function() {
+        
+        var data, store;
+
+        function expectChartDataToBe(chartData, expectedSeriesData) {
+            expect(chartData.categories).toEqual(['Defined', 'In-Progress', 'Completed']);
+            expect(chartData.series.length).toBe(1);
+            var seriesData = chartData.series[0];
+            expect(seriesData.name).toBe('State');
+            expect(seriesData.data).toEqual(expectedSeriesData);
+        }
+
+        beforeEach(function() {
+            var model = Rally.test.Mock.dataFactory.getModel('task');
+            data = Rally.test.Mock.dataFactory.getRecords('task', {
+                count: 4,
+                values: [
+                    { Actuals: 1, Estimate: 2, State: 'Defined' },
+                    { Actuals: 2, Estimate: 3, State: 'In-Progress' },
+                    { Actuals: 3, Estimate: 4, State: 'Completed' },
+                    { Actuals: 4, Estimate: 5, State: 'Completed' }
+                ]
+            });
+            store = Ext.create('Rally.data.wsapi.Store', {
+              model: model,
+              data: data
+            });
+        });
+
+        it('should aggregate by count', function() {
+            var calculator = Ext.create('Calculator', {
+                field: 'State',
+                calculationType: 'count'
+            });
+            var chartData = calculator.prepareChartData(store);
+            expectChartDataToBe(chartData, [['Defined', 1], ['In-Progress', 1], ['Completed', 2]]);
+        });
+
+        it('should aggregate by estimate', function() {
+            var calculator = Ext.create('Calculator', {
+                field: 'State',
+                calculationType: 'taskest'
+            });
+            var chartData = calculator.prepareChartData(store);
+            expectChartDataToBe(chartData, [['Defined', 2], ['In-Progress', 3], ['Completed', 9]]);
+        });
+
+         it('should aggregate by actuals', function() {
+            var calculator = Ext.create('Calculator', {
+                field: 'State',
+                calculationType: 'taskactuals'
+            });
+            var chartData = calculator.prepareChartData(store);
+            expectChartDataToBe(chartData, [['Defined', 1], ['In-Progress', 2], ['Completed', 7]]);
+        });
+    });
+
     describe('with defects', function() {
 
         var data, store;

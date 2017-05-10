@@ -134,7 +134,9 @@ Ext.define('Settings', {
                         { name: 'Leaf Story Count', value: 'leafcount' },
                         { name: 'Leaf Story Plan Estimate Total', value: 'leafplanest' },
                         { name: 'Preliminary Estimate Total', value: 'prelimest' },
-                        { name: 'Refined Estimate Total', value: 'refinedest' }
+                        { name: 'Refined Estimate Total', value: 'refinedest' },
+                        { name: 'Actuals Total', value: 'taskactuals'},
+                        { name: 'Estimate Total', value: 'taskest'}
                     ]
                 },
                 lastQuery: '',

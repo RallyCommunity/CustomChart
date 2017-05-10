@@ -15,6 +15,10 @@ Ext.define('Utils', {
                 return 'PreliminaryEstimateValue';
             case 'refinedest':
                 return 'RefinedEstimate';
+            case 'taskest':
+                return 'Estimate';
+            case 'taskactuals':
+                return 'Actuals';
             default:
                 return 'PlanEstimate';
         }
