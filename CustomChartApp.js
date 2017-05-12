@@ -122,7 +122,7 @@ Ext.define('CustomChartApp', {
 
         if (Rally.data.ModelTypes.isArtifact(type)) {
             quickFilters.push('Owner');
-            if (Rally.data.ModelTypes.isPortfolioItem(type)) {
+            if (Rally.data.ModelTypes.isPortfolioItem(type) || type.toLowerCase() === 'task') {
                 quickFilters.push('State');
             } else {
                 quickFilters.push('ScheduleState');
