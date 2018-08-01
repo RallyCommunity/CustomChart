@@ -193,6 +193,7 @@ Ext.define('Settings', {
                 lastQuery: '',
                 handlesEvents: {
                     typeselected: function (types) {
+                        var saved_type = Rally.getApp().getSetting('aggregationType');
                         var type = Ext.Array.from(types)[0];
                         Rally.data.ModelFactory.getModel({
                             type: type,
@@ -212,6 +213,9 @@ Ext.define('Settings', {
                                     return record.get('value') === 'count' ||
                                         model.hasField(Utils.getFieldForAggregationType(record.get('value')));
                                 });
+
+                                if ( saved_type ) { this.setValue(saved_type); }
+
                                 if (!this.store.findRecord('value', this.getValue())) {
                                     this.setValue('count');
                                 }
