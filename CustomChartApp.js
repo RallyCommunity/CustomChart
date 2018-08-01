@@ -33,13 +33,23 @@ Ext.define('CustomChartApp', {
        return Settings.getSettingsFields(this.getContext());
     },
 
+    _shouldLoadAllowedStackValues: function(stackingField) {
+      var hasAllowedValues = stackingField && stackingField.hasAllowedValues(), 
+          shouldLoadAllowedValues = hasAllowedValues && (
+            _.contains(['state', 'rating', 'string'], stackingField.getType()) ||
+            stackingField.getAllowedValueType() === 'state' ||
+            stackingField.getAllowedValueType() === 'flowstate'
+          );
+      return shouldLoadAllowedValues;
+    },
+
     _onModelsLoaded: function(models) {
         this.models = _.values(models);
         var model = this.models[0],
             stackingSetting = this._getStackingSetting(),
             stackingField = stackingSetting && model.getField(stackingSetting);
-
-        if (stackingField && stackingField.hasAllowedValues() && _.contains(['state', 'rating', 'string'], stackingField.getType())) {
+            
+        if (this._shouldLoadAllowedStackValues(stackingField)) {
             stackingField.getAllowedValueStore().load().then({
                 success: function(records) {
                     this.stackValues = _.invoke(records, 'get', 'StringValue');

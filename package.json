@@ -1,6 +1,6 @@
 {
   "name": "CustomChart",
-  "version": "1.2.6",
+  "version": "1.2.8",
   "private": true,
   "devDependencies": {
     "grunt": "~0.4.5",
