@@ -187,19 +187,35 @@ Ext.define('Settings', {
                         { name: 'Refined Estimate Total', value: 'refinedest' },
                         { name: 'Actuals Total', value: 'taskactuals'},
                         { name: 'Estimate Total', value: 'taskest'}
-                    ]
+                    ],
+                    sorters: [{property:'name'}]
                 },
                 lastQuery: '',
                 handlesEvents: {
                     typeselected: function (types) {
+                        var saved_type = Rally.getApp().getSetting('aggregationType');
                         var type = Ext.Array.from(types)[0];
                         Rally.data.ModelFactory.getModel({
                             type: type,
                             success: function(model) {
+                                var blackList = ['ObjectID'];
+                                _.each(model.getFields(), function(field){
+                                    if ( !field.hidden && field.type && field.type.type === "int" && !_.contains(blackList, field.name)) {
+                                        var new_record = {name: field.displayName, value: field.name};
+                                        if (!/ [C|c]ount/.test(field.displayName)) {
+                                            new_record.name = new_record.name + " Total";
+                                        }
+                                        Utils.addUniqueFieldToStore(new_record,this.store);
+                                    }
+                                },this);
+
                                 this.store.filterBy(function(record) {
                                     return record.get('value') === 'count' ||
                                         model.hasField(Utils.getFieldForAggregationType(record.get('value')));
                                 });
+
+                                if ( saved_type ) { this.setValue(saved_type); }
+
                                 if (!this.store.findRecord('value', this.getValue())) {
                                     this.setValue('count');
                                 }
