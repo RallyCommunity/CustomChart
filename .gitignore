@@ -8,4 +8,6 @@ App-local.html
 .idea
 .c9revisions
 node_modules
-.DS_Store
+#test files
+_SpecRunner.html
+.grunt

@@ -7,11 +7,41 @@
 
     <script type="text/javascript">
         Rally.onReady(function () {
+                Ext.define('Utils', {
+    singleton: true,
+
+    getFieldForAggregationType: function(aggregationType) {
+        switch(aggregationType) {
+            case 'acceptedleafcount':
+                return 'AcceptedLeafStoryCount';
+            case 'acceptedleafplanest':
+                return 'AcceptedLeafStoryPlanEstimateTotal';
+            case 'leafcount':
+                return 'LeafStoryCount';
+            case 'leafplanest':
+                return 'LeafStoryPlanEstimateTotal';
+            case 'prelimest':
+                return 'PreliminaryEstimateValue';
+            case 'refinedest':
+                return 'RefinedEstimate';
+            case 'taskest':
+                return 'Estimate';
+            case 'taskactuals':
+                return 'Actuals';
+            default:
+                return 'PlanEstimate';
+        }
+    }
+});
+
                 Ext.define('Calculator', {
 
     config: {
         calculationType: undefined,
-        field: undefined
+        field: undefined,
+        stackField: undefined,
+        stackValues: undefined,
+        bucketBy: undefined
     },
 
     constructor: function(config) {
@@ -19,54 +49,200 @@
     },
 
     prepareChartData: function(store) {
-        var data = _.groupBy(store.getRange(), function(record) {
-            var value = record.get(this.field);
-            return _.isObject(value) ? value._refObjectName : value;
-        }, this),
+        var data = this._groupData(store),
         categories = _.keys(data),
         seriesData;
 
-        if(this.calculationType === 'count') {
-            seriesData = _.map(data, function(value, key) {
-              return [key, value.length];
-            });
+        if (!this.stackField) {
+            if(this.calculationType === 'count') {
+                seriesData = _.map(data, function(value, key) {
+                    return [key, value.length];
+                });
+            } else {
+                seriesData = _.map(data, function(value, key) {
+                    var valueTotal = _.reduce(value, function(total, r) {
+                        var valueField = this._getValueFieldForCalculationType();
+                        return total + r.get(valueField);
+                    }, 0, this);
+                    return [key, valueTotal];
+                }, this);
+            }
+          
+            return {
+                categories: categories,
+                series: [
+                    {
+                        name: this.field,
+                        type: this.seriesType,
+                        data: seriesData
+                    }
+                ]
+            };
         } else {
-            seriesData = _.map(data, function(value, key) {
-                var valueTotal = _.reduce(value, function(total, r) {
-                    var valueField = this._getValueFieldForCalculationType();
-                    return total + r.get(valueField);
-                }, 0, this);
-                return [key, valueTotal];
+            var stackField = store.model.getField(this.stackField),
+                stackValues;
+
+            if (this.stackValues) {
+                stackValues = _.map(this.stackValues, function(stackValue) {
+                    return this._getDisplayValue(stackField, stackValue);
+                }, this);
+            } else {
+                var values = _.invoke(store.getRange(), 'get', this.stackField);
+                if (this.stackField === 'Iteration' || this.stackField === 'Release') {
+                    values = _.sortBy(values, function(timebox) {
+                        var dateValue = timebox && (timebox.StartDate || timebox.ReleaseStartDate || null);
+                        return new Date(dateValue);
+                    });
+                }
+                stackValues = _.unique(_.map(values, function(value) {
+                    return this._getDisplayValue(stackField, value);
+                }, this));
+            }
+
+            var series = {};
+            _.each(categories, function(category) {
+                var group = data[category];
+                var recordsByStackValue = _.groupBy(group, function(record) {
+                    return this._getDisplayValueForField(record, this.stackField);
+                }, this);
+                _.each(stackValues, function(stackValue) {
+                    series[stackValue] = series[stackValue] || [];
+                    var records = recordsByStackValue[stackValue];
+                    if(this.calculationType === 'count') {
+                        series[stackValue].push((records && records.length) || 0);
+                    } else {
+                        var valueTotal = _.reduce(records, function(total, r) {
+                            var valueField = this._getValueFieldForCalculationType();
+                            return total + r.get(valueField);
+                        }, 0, this);
+                        series[stackValue].push(valueTotal);
+                    }
+                }, this);
             }, this);
+          
+            return {
+                categories: categories,
+                series: _.map(stackValues, function(value) {
+                    return {
+                        name: value,
+                        type: this.seriesType,
+                        data: series[value]
+                    };
+                }, this)
+            };
+        }
+    },
+
+    _groupData: function(store) {
+        var field = store.model.getField(this.field),
+            fieldType = field.getType(),
+            groups = {};
+        if (fieldType === 'collection') {
+            _.each(store.getRange(), function(record) {
+                var value = record.get(this.field),
+                    values = value._tagsNameArray;
+                if (_.isEmpty(values)) {
+                    groups.None = groups.None || [];
+                    groups.None.push(record);
+                } else {
+                    _.each(values, function(val) {
+                        groups[val.Name] = groups[val.Name] || [];
+                        groups[val.Name].push(record);
+                    });
+                }
+            }, this);
+            return groups;
+        } else {
+            groups = _.groupBy(store.getRange(), function(record) {
+                return this._getDisplayValueForField(record, this.field);
+            }, this);
+            if (fieldType === 'date') {
+                var dates = _.sortBy(_.compact(_.map(store.getRange(), function(record) { 
+                    return record.get(this.field); 
+                }, this)));
+                var datesNoGaps = this._getDateRange(dates[0], dates[dates.length-1]);
+                var allGroups = {};
+                if (groups['-- No Entry --']) {
+                    allGroups['-- No Entry --'] = groups['-- No Entry --'];
+                }
+                groups = _.reduce(datesNoGaps, function(accum, val) {
+                    var group = this._getDisplayValue(field, moment(val).toDate()); 
+                    accum[group] = groups[group] || [];
+                    return accum;
+                }, allGroups, this);
+            }
+
+            return groups;
+        }
+    },
+
+    _getDateRange: function(startDate, endDate) {
+        var currentDate = startDate;
+        var datesNoGaps = [];
+        var unit = 'd';
+        if (this.bucketBy === 'week') {
+            unit = 'w';
+        } else if(this.bucketBy === 'month') {
+            unit = 'M';
+        } else if(this.bucketBy === 'quarter') {
+            unit = 'Q';
+        } else if(this.bucketBy === 'year') {
+            unit = 'y';
         }
 
-        return {
-            categories: categories,
-            series: [
-                {
-                    name: this.field,
-                    type: this.seriesType,
-                    data: seriesData
-                }
-            ]
-        };
+        while(currentDate <= endDate) {
+            datesNoGaps.push(currentDate);
+            currentDate = moment(currentDate).add(1, unit).toDate();
+        }
+
+        datesNoGaps.push(endDate);
+        return datesNoGaps;
+    },
+
+    _getDisplayValueForField: function(record, fieldName) {
+        var field = record.getField(fieldName),
+            value = record.get(fieldName);
+        
+        return this._getDisplayValue(field, value);
+    },
+
+    _getDisplayValue: function(field, value) {
+        if (_.isDate(value)) {
+            if (!this.bucketBy || this.bucketBy === 'day') {
+                return Rally.util.DateTime.formatWithDefault(value);
+            } else if (this.bucketBy === 'week') {
+                return Rally.util.DateTime.formatWithDefault(moment(value).startOf('week').toDate());
+            } else if (this.bucketBy === 'month') {
+                return moment(value).startOf('month').format('MMM \'YY');
+            } else if (this.bucketBy === 'quarter') {
+                return moment(value).startOf('quarter').format('YYYY [Q]Q');
+            } else if (this.bucketBy === 'year') {
+                return moment(value).startOf('year').format('YYYY');
+            }
+        } else if (_.isObject(value)) {
+            return value._refObjectName;
+        } else if (Ext.isEmpty(value)) {
+            var fieldType = field.getType();
+            if (field.attributeDefinition.SchemaType === 'User') {
+                return '-- No Owner --';
+            } else if (fieldType === 'rating' || fieldType === 'object') {
+                return 'None';
+            } else {
+                return '-- No Entry --';
+            }
+        } else {
+            return value;
+        }
     },
 
     _getValueFieldForCalculationType: function() {
-        switch(this.calculationType) {
-            case 'leafplanest':
-                return 'LeafStoryPlanEstimateTotal';
-            case 'prelimest':
-                return 'PreliminaryEstimateValue';
-            default:
-                return 'PlanEstimate';
-        }
+        return Utils.getFieldForAggregationType(this.calculationType);
     }
 });
 
                 Ext.define('BarCalculator', {
     extend: 'Calculator',
-    seriesType: 'column'
+    seriesType: 'bar'
 });
 
                 Ext.define('BarChart', {
@@ -76,40 +252,119 @@
         'BarCalculator'
     ],
 
-    chartConfig: {
-        chart: { type: 'column' },
-        title: {
-            text: ''
-        },
-        tooltip: {
-            headerFormat: '',
-            pointFormat: '{point.name}: <b>{point.y}</b>'
-        },
-        yAxis: {
-            min: 0,
+    config: {
+        chartConfig: {
+            chart: { type: 'bar' },
             title: {
-                text: ''//this.down('radiogroup').getValue().barCalculationType
+                text: ''
             },
-            stackLabels: {
-                enabled: true,
-                style: {
-                    fontWeight: 'bold',
-                    color: 'gray'
+            yAxis: {
+                min: 0,
+                title: {
+                    text: ''
+                },
+                stackLabels: {
+                    enabled: true,
+                    style: {
+                        fontWeight: 'bold',
+                        color: 'gray'
+                    }
+                },
+                reversedStacks: false
+            },
+            plotOptions: {
+                bar: {
+                    stacking: 'normal',
+                    dataLabels: {
+                        enabled: false
+                    },
+                    showInLegend: true,
+                    colorByPoint: false
                 }
             }
         },
-        plotOptions: {
-            column: {
-                stacking: 'normal',
-                dataLabels: {
-                    enabled: false
-                },
-                showInLegend: false,
-                colorByPoint: true
-            }
-        }
+        calculatorType: 'BarCalculator'
     },
-    calculatorType: 'BarCalculator'
+
+    constructor: function(config) {
+        config = config || {};
+        this.mergeConfig(config);
+
+        this.chartConfig.plotOptions.bar.showInLegend = this.enableStacking;
+        this.chartConfig.plotOptions.bar.colorByPoint = !this.enableStacking;
+
+        if (!this.enableStacking) {
+            this.chartConfig.tooltip = {
+                headerFormat: '',
+                pointFormat: '{point.name}: <b>{point.y}</b>'
+            };
+        }
+
+        this.callParent([this.config]);
+    }
+});
+
+                Ext.define('ColumnCalculator', {
+    extend: 'Calculator',
+    seriesType: 'column'
+});
+
+                Ext.define('ColumnChart', {
+    xtype: 'columnchart',
+    extend: 'Rally.ui.chart.Chart',
+    requires: [
+        'ColumnCalculator'
+    ],
+
+    config: {
+        chartConfig: {
+            chart: { type: 'column' },
+            title: {
+                text: ''
+            },
+            yAxis: {
+                min: 0,
+                title: {
+                    text: ''
+                },
+                stackLabels: {
+                    enabled: true,
+                    style: {
+                        fontWeight: 'bold',
+                        color: 'gray'
+                    }
+                },
+                reversedStacks: false
+            },
+            plotOptions: {
+                column: {
+                    stacking: 'normal',
+                    dataLabels: {
+                        enabled: false
+                    },
+                    showInLegend: false,
+                    colorByPoint: true
+                }
+            }
+        },
+        calculatorType: 'ColumnCalculator'
+    },
+
+    constructor: function(config) {
+        config = config || {};
+        this.mergeConfig(config);
+
+        this.chartConfig.plotOptions.column.showInLegend = this.enableStacking;
+        this.chartConfig.plotOptions.column.colorByPoint = !this.enableStacking;
+        
+        if (!this.enableStacking) {
+            this.chartConfig.tooltip = {
+                headerFormat: '',
+                pointFormat: '{point.name}: <b>{point.y}</b>'
+            };
+        }
+        this.callParent([this.config]);
+    }
 });
 
                 Ext.define('PieCalculator', {
@@ -124,67 +379,48 @@
         'PieCalculator'
     ],
 
-    chartConfig: {
-        chart: {
-            type: 'pie',
-            plotBackgroundColor: null,
-            plotBorderWidth: null,
-            plotShadow: false
-        },
-        title: {text: ''},
-        tooltip: {
-            headerFormat: '',
-            pointFormat: '{point.name}: <b>{point.percentage:.1f}%</b>'
-        },
-        plotOptions: {
-            pie: {
-                allowPointSelect: true,
-                cursor: 'pointer',
-                dataLabels: {
-                    enabled: true,
-                    format: '<b>{point.name}</b>: {point.percentage:.1f} %',
-                    style: {
-                        color: 'black'
+    config: {
+        chartConfig: {
+            chart: {
+                type: 'pie',
+                plotBackgroundColor: null,
+                plotBorderWidth: null,
+                plotShadow: false
+            },
+            title: {text: ''},
+            tooltip: {
+                headerFormat: '',
+                pointFormat: '<b>{point.name}:</b> {point.percentage:.1f}% ({point.y}/{point.total})'
+            },
+            plotOptions: {
+                pie: {
+                    allowPointSelect: true,
+                    cursor: 'pointer',
+                    dataLabels: {
+                        enabled: true,
+                        format: '<b>{point.name}:</b> {point.percentage:.1f}% ({point.y}/{point.total})',
+                        style: {
+                            color: 'black'
+                        }
                     }
                 }
             }
-        }
+        },
+        calculatorType: 'PieCalculator'
     },
-    calculatorType: 'PieCalculator'
+
+    constructor: function(config) {
+        config = config || {};
+        this.mergeConfig(config);
+        this.callParent([this.config]);
+    }
 });
 
-                Ext.define('CustomChartApp', {
-    extend: 'Rally.app.App',
-    componentCls: 'app',
+                Ext.define('Settings', {
+    singleton: true,
 
-    layout: 'fit',
-
-    config: {
-        defaultSettings: {
-            types: 'defect',
-            chartType: 'piechart',
-            aggregationField: 'State',
-            aggregationType: 'count',
-            query: ''
-        }
-    },
-
-    launch: function() {
-        if (!this.getSetting('types')) {
-            this.fireEvent('appsettingsneeded'); //todo: does this work?
-        } else {
-            Rally.data.wsapi.ModelFactory.getModels({
-                types: this._getTypesSetting()
-            }).then({
-                success: this._onModelsLoaded,
-                scope: this
-            });
-        }
-    },
-
-    getSettingsFields: function() {
-        var me = this;
-        return [
+    getSettingsFields: function(context) {
+         return [
             {
                 name: 'chartType',
                 xtype: 'rallycombobox',
@@ -197,10 +433,22 @@
                 store: Ext.create('Ext.data.Store', {
                     fields: ['name', 'value'],
                     data: [
+                        { name: 'Bar', value: 'barchart' },
+                        { name: 'Column', value: 'columnchart'},
                         { name: 'Pie', value: 'piechart' },
-                        { name: 'Bar', value: 'barchart' }
                     ]
-                })
+                }),
+                listeners: {
+                    change: function (combo) {
+                        combo.fireEvent('chartselected', combo.getValue(), combo.context);
+                    }
+                },
+                bubbleEvents: ['chartselected'],
+                handlesEvents: {
+                    typeselected: function () {
+                        this.fireEvent('chartselected', this.getValue());
+                    }
+                },
             },
             {
                 name: 'types',
@@ -214,7 +462,7 @@
                 fieldLabel: 'Type', //todo: delete when multiselect enabled
                 // multiSelect: true, //todo: need to validate either all artifacts chosen or only one non-artifact
                 shouldRespondToScopeChange: true,
-                context: this.getContext(),
+                context: context,
                 // initialValue: ['HierarchicalRequirement'], //todo: not working
                 storeConfig: {
                     model: 'TypeDefinition',
@@ -253,6 +501,7 @@
                 allowBlank: false,
                 validateOnChange: false,
                 validateOnBlur: false,
+                width: 300,
                 handlesEvents: {
                     typeselected: function (models, context) {
                         var type = Ext.Array.from(models)[0];
@@ -264,13 +513,20 @@
                         }
                     }
                 },
+                bubbleEvents: ['fieldselected'],
                 listeners: {
+                    change: function (combo) {
+                        if (combo.getRecord()) {
+                            combo.fireEvent('fieldselected', combo.getRecord().get('fieldDefinition'));
+                        }
+                    },
                     ready: function (combo) {
                         combo.store.filterBy(function (record) {
                             var field = record.get('fieldDefinition'),
-                                attr = field.attributeDefinition;
-                            return attr && !attr.Hidden && attr.AttributeType !== 'COLLECTION' &&
-                                !field.isMappedFromArtifact;
+                                attr = field.attributeDefinition,
+                                whiteList = ['Tags', 'Milestones'];
+                            return attr && !attr.Hidden && (((attr.AttributeType !== 'COLLECTION' || field.isMultiValueCustom()) &&
+                                !field.isMappedFromArtifact) || _.contains(whiteList, field.name));
                         });
                         var fields = Ext.Array.map(combo.store.getRange(), function (record) {
                             return record.get(combo.getValueField());
@@ -279,6 +535,50 @@
                         if (!Ext.Array.contains(fields, combo.getValue())) {
                             combo.setValue(fields[0]);
                         }
+
+                        if (combo.getRecord()) {
+                            combo.fireEvent('fieldselected', combo.getRecord().get('fieldDefinition'));
+                        }
+                    }
+                }
+            },
+            {
+                name: 'bucketBy',
+                xtype: 'rallycombobox',
+                plugins: ['rallyfieldvalidationui'],
+                fieldLabel: 'Bucket By',
+                displayField: 'name',
+                valueField: 'value',
+                editable: false,
+                allowBlank: false,
+                store: {
+                    fields: ['name', 'value'],
+                    data: [
+                        { name: 'Day', value: 'day' },
+                        { name: 'Week', value: 'week' },
+                        { name: 'Month', value: 'month' },
+                        { name: 'Quarter', value: 'quarter' },
+                        // { name: 'Release', value: 'release' },
+                        { name: 'Year', value: 'year' }
+                    ]
+                },
+                lastQuery: '',
+                hidden: true,
+                toggleVisibility: function() {
+                    if (this.selectedFieldType === 'date' && this.selectedChartType !== 'piechart') {
+                        this.show();
+                      } else {
+                        this.hide();
+                    }
+                },
+                handlesEvents: {
+                    fieldselected: function(field) {
+                        this.selectedFieldType = field.getType();
+                        this.toggleVisibility();
+                    },
+                    chartselected: function (type) {
+                        this.selectedChartType = type;
+                        this.toggleVisibility();
                     }
                 }
             },
@@ -291,25 +591,36 @@
                 valueField: 'value',
                 editable: false,
                 allowBlank: false,
-                store: Ext.create('Ext.data.Store', {
+                width: 300,
+                store: {
                     fields: ['name', 'value'],
                     data: [
+                        { name: 'Accepted Leaf Story Count', value: 'acceptedleafcount' },
+                        { name: 'Accepted Leaf Story Plan Estimate Total', value: 'acceptedleafplanest' },
                         { name: 'Count', value: 'count' },
-                        { name: 'Plan Estimate', value: 'estimate' },
+                        { name: 'Plan Estimate Total', value: 'estimate' },
+                        { name: 'Leaf Story Count', value: 'leafcount' },
                         { name: 'Leaf Story Plan Estimate Total', value: 'leafplanest' },
-                        { name: 'Preliminary Estimate Value', value: 'prelimest' }
+                        { name: 'Preliminary Estimate Total', value: 'prelimest' },
+                        { name: 'Refined Estimate Total', value: 'refinedest' },
+                        { name: 'Actuals Total', value: 'taskactuals'},
+                        { name: 'Estimate Total', value: 'taskest'}
                     ]
-                }),
+                },
+                lastQuery: '',
                 handlesEvents: {
-                    typeselected: function (types, context) {
+                    typeselected: function (types) {
                         var type = Ext.Array.from(types)[0];
                         Rally.data.ModelFactory.getModel({
                             type: type,
                             success: function(model) {
                                 this.store.filterBy(function(record) {
                                     return record.get('value') === 'count' ||
-                                        model.hasField(me._getFieldForAggregationType(record.get('value')));
-                                });        
+                                        model.hasField(Utils.getFieldForAggregationType(record.get('value')));
+                                });
+                                if (!this.store.findRecord('value', this.getValue())) {
+                                    this.setValue('count');
+                                }
                             },
                             scope: this
                         });
@@ -317,13 +628,130 @@
                     }
                 },
             },
+            {
+                name: 'stackField',
+                xtype: 'rallyfieldcombobox',
+                plugins: ['rallyfieldvalidationui'],
+                fieldLabel: 'Stack By',
+                readyEvent: 'ready',
+                allowBlank: false,
+                allowNoEntry: true,
+                noEntryText: '-- No Stacking --',
+                validateOnChange: false,
+                validateOnBlur: false,
+                width: 300,
+                hidden: true,
+                toggleVisibility: function(chartType) {
+                    if (chartType === 'piechart') {
+                        this.hide();
+                        this.select(this.store.getRange()[0]);
+                    } else {
+                        this.show();
+                    }
+                },
+                handlesEvents: {
+                    chartselected: function (chartType) {
+                        this.toggleVisibility(chartType);
+                    },
+                    typeselected: function (models, context) {
+                        var type = Ext.Array.from(models)[0];
+                        if (type) {
+                            this.refreshWithNewModelType(type, context); //todo: how to handle multiple models
+                        }
+                    }
+                },
+                listeners: {
+                    ready: function (combo) {
+                        combo.store.filterBy(function (record) {
+                            var field = record.get('fieldDefinition'),
+                                attr = field.attributeDefinition;
+
+                            return record.get(combo.getValueField()) === combo.noEntryValue ||
+                                (attr && !attr.Hidden && field.hasAllowedValues() && !_.contains(['collection'], field.getType()));
+                        });
+
+                        var fields = Ext.Array.map(combo.store.getRange(), function (record) {
+                            return record.get(combo.getValueField());
+                        });
+
+                        if (!Ext.Array.contains(fields, combo.getValue())) {
+                            combo.setValue(fields[0]);
+                        }
+                    }
+                }
+            },
             { type: 'query' }
         ];
+    }
+});
+
+                Ext.define('CustomChartApp', {
+    extend: 'Rally.app.App',
+    componentCls: 'app',
+
+    layout: 'fit',
+
+    config: {
+        defaultSettings: {
+            types: 'Defect',
+            chartType: 'piechart',
+            aggregationField: 'State',
+            aggregationType: 'count',
+            bucketBy: '',
+            stackField: '',
+            query: ''
+        }
+    },
+
+    launch: function() {
+        if (!this.getSetting('types')) {
+            this.fireEvent('appsettingsneeded'); //todo: does this work?
+        } else {
+            Rally.data.wsapi.ModelFactory.getModels({
+                types: this._getTypesSetting()
+            }).then({
+                success: this._onModelsLoaded,
+                scope: this
+            });
+        }
+    },
+
+    getSettingsFields: function() {
+       return Settings.getSettingsFields(this.getContext());
+    },
+
+    _shouldLoadAllowedStackValues: function(stackingField) {
+      var hasAllowedValues = stackingField && stackingField.hasAllowedValues(), 
+          shouldLoadAllowedValues = hasAllowedValues && (
+            _.contains(['state', 'rating', 'string'], stackingField.getType()) ||
+            stackingField.getAllowedValueType() === 'state' ||
+            stackingField.getAllowedValueType() === 'flowstate'
+          );
+      return shouldLoadAllowedValues;
     },
 
     _onModelsLoaded: function(models) {
         this.models = _.values(models);
+        var model = this.models[0],
+            stackingSetting = this._getStackingSetting(),
+            stackingField = stackingSetting && model.getField(stackingSetting);
+            
+        if (this._shouldLoadAllowedStackValues(stackingField)) {
+            stackingField.getAllowedValueStore().load().then({
+                success: function(records) {
+                    this.stackValues = _.invoke(records, 'get', 'StringValue');
+                    this._addChart();
+                },
+                scope: this
+            });
+        } else {
+            this._addChart();
+        }
+    },
+
+    _addChart: function() {
         var context = this.getContext(),
+            whiteListFields = ['Milestones', 'Tags'],
             modelNames = _.pluck(this.models, 'typePath'),
             gridBoardConfig = {
                 xtype: 'rallygridboard',
@@ -339,8 +767,18 @@
                         modelNames: modelNames,
                         inlineFilterPanelConfig: {
                             quickFilterPanelConfig: {
-                                defaultFields: this._getQuickFilters()
-                            }
+                                defaultFields: this._getQuickFilters(),
+                                addQuickFilterConfig: {
+                                   whiteListFields: whiteListFields
+                                }
+                            },
+                            advancedFilterPanelConfig: {
+                               advancedFilterRowsConfig: {
+                                   propertyFieldConfig: {
+                                       whiteListFields: whiteListFields
+                                   }
+                               }
+                           }
                         }
                     }
                 },
@@ -373,99 +811,130 @@
     },
 
     _getQuickFilters: function() {
-        var quickFilters = [],
-          types = this._getTypesSetting(),
-          type = types[0];
-        if (types.length > 1) {
+        var quickFilters = ['Owner', 'State', 'ScheduleState'],
+            model = this.models[0];
+        if (this.models.length > 1) {
             quickFilters.push('ModelType');
         }
 
-        if (Rally.data.ModelTypes.isArtifact(type)) {
-            quickFilters.push('Owner');
-            if (Rally.data.ModelTypes.isPortfolioItem(type)) {
-                quickFilters.push('State');
-            } else {
-                quickFilters.push('ScheduleState');
-            }
-        }
-
-        return quickFilters;
+        return _.filter(quickFilters, function(quickFilter) {
+            return model.hasField(quickFilter);
+        });
     },
 
     _getTypesSetting: function() {
         return this.getSetting('types').split(',');
     },
 
-    _getChartConfig: function() {
-        return {
-            xtype: this.getSetting('chartType'),
-            storeType: 'Rally.data.wsapi.artifact.Store', //todo: only if artifact types selected
-            chartColors: [
-              "#FF8200", // $orange
-              "#F6A900", // $gold
-              "#FAD200", // $yellow
-              "#8DC63F", // $lime
-              "#1E7C00", // $green_dk
-              "#337EC6", // $blue_link
-              "#005EB8", // $blue
-              "#7832A5", // $purple,
-              "#DA1884",  // $pink,
-              "#C0C0C0" // $grey4
-            ],
-            storeConfig: {
-                models: this._getTypesSetting(),
-                context: this.getContext().getDataContext(),
-                //TODO: can we do summary fetch here and not limit infinity?
-                //we'll have to also make sure the fetch is correct for export somehow...
-                limit: Infinity,
-                fetch: this._getChartFetch(),
-                sorters: this._getChartSort()
-            },
-            calculatorConfig: {
-                calculationType: this.getSetting('aggregationType'),
-                field: this.getSetting('aggregationField')
-            }
-        };
+    _getStackingSetting: function() {
+        var chartType = this.getSetting('chartType');
+        return chartType !== 'piechart' ? this.getSetting('stackField') : null;
     },
 
-    onTimeboxScopeChange: function(timeboxScope) {
+    _getChartConfig: function() {
+        var chartType = this.getSetting('chartType'),
+            stackField = this._getStackingSetting(),
+            stackValues = this.stackValues,
+            model = this.models[0],
+            config = {
+                xtype: chartType,
+                enableStacking: !!stackField,
+                chartColors: [
+                "#FF8200", // $orange
+                "#F6A900", // $gold
+                "#FAD200", // $yellow
+                "#8DC63F", // $lime
+                "#1E7C00", // $green_dk
+                "#337EC6", // $blue_link
+                "#005EB8", // $blue
+                "#7832A5", // $purple,
+                "#DA1884",  // $pink,
+                "#C0C0C0" // $grey4
+                ],
+                storeConfig: {
+                    context: this.getContext().getDataContext(),
+                    //TODO: can we do summary fetch here and not limit infinity?
+                    //we'll have to also make sure the fetch is correct for export somehow...
+                    limit: Infinity,
+                    fetch: this._getChartFetch(),
+                    sorters: this._getChartSort(),
+                    pageSize: 2000,
+                },
+                calculatorConfig: {
+                    calculationType: this.getSetting('aggregationType'),
+                    field: this.getSetting('aggregationField'),
+                    stackField: stackField,
+                    stackValues: stackValues,
+                    bucketBy: chartType === 'piechart' ? null : this.getSetting('bucketBy')
+                }
+            };
+
+        if (model.isArtifact()) {
+            config.storeConfig.models = this._getTypesSetting();
+            config.storeType = 'Rally.data.wsapi.artifact.Store';
+        } else {
+            config.storeConfig.model = model;
+            config.storeType = 'Rally.data.wsapi.Store';
+        }
+
+        return config;
+    },
+
+    onTimeboxScopeChange: function() {
         this.callParent(arguments);
-        this._addBoard();
+
+        var gridBoard = this.down('rallygridboard');
+        if (gridBoard) {
+            gridBoard.destroy();
+        }
+
+        this._addChart();
     },
 
     _getChartFetch: function() {
         var field = this.getSetting('aggregationField'),
             aggregationType = this.getSetting('aggregationType'),
+            stackField = this._getStackingSetting(),
             fetch = ['FormattedID', 'Name', field];
 
         if (aggregationType !== 'count') {
-            fetch.push(this._getFieldForAggregationType(aggregationType));
+            fetch.push(Utils.getFieldForAggregationType(aggregationType));
         }
+        if (stackField) {
+            fetch.push(stackField);
+        }
+
+        if (_.contains(fetch, 'Iteration')) {
+            fetch.push('StartDate');
+        }
+        if (_.contains(fetch, 'Release')) {
+            fetch.push('ReleaseStartDate');
+        }
+
         return fetch;
     },
 
-    _getFieldForAggregationType: function(aggregationType) {
-        if (aggregationType === 'estimate') {
-            return 'PlanEstimate';
-        } else if (aggregationType === 'prelimest') {
-            return 'PreliminaryEstimateValue';
-        } else if (aggregationType === 'leafplanest') {
-            return 'LeafStoryPlanEstimateTotal';
-        }
-    },
-
     _getChartSort: function() {
-        return [{
-            property: this.getSetting('aggregationField'),
-            direction: 'ASC'
-        }];
+        var model = this.models[0],
+            field = model.getField(this.getSetting('aggregationField')),
+            sorters = [];
+
+        if (field && field.getType() !== 'collection' && field.sortable) {
+            sorters.push({
+                property: this.getSetting('aggregationField'),
+                direction: 'ASC'
+            });
+        }
+
+        return sorters;
     },
 
     _getFilters: function() {
         var queries = [],
             timeboxScope = this.getContext().getTimeboxScope();
         if (this.getSetting('query')) {
-            queries.push(Rally.data.QueryFilter.fromQueryString(this.getSetting('query')));
+            var querySetting = this.getSetting('query').replace(/\{user\}/g, this.getContext().getUser()._ref);
+            queries.push(Rally.data.QueryFilter.fromQueryString(querySetting));
         }
         if (timeboxScope && _.any(this.models, timeboxScope.isApplicable, timeboxScope)) {
             queries.push(timeboxScope.getQueryFilter());
@@ -477,7 +946,8 @@
 
             Rally.launchApp('CustomChartApp', {
                 name:"Custom Chart",
-	            parentRepos:""
+                parentRepos:"",
+                version:"1.2.8"
             });
 
         });
