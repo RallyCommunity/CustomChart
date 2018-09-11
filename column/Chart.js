@@ -1,13 +1,13 @@
-Ext.define('BarChart', {
-    xtype: 'barchart',
+Ext.define('ColumnChart', {
+    xtype: 'columnchart',
     extend: 'Rally.ui.chart.Chart',
     requires: [
-        'BarCalculator'
+        'ColumnCalculator'
     ],
 
     config: {
         chartConfig: {
-            chart: { type: 'bar' },
+            chart: { type: 'column' },
             title: {
                 text: ''
             },
@@ -26,33 +26,32 @@ Ext.define('BarChart', {
                 reversedStacks: false
             },
             plotOptions: {
-                bar: {
+                column: {
                     stacking: 'normal',
                     dataLabels: {
                         enabled: false
                     },
-                    showInLegend: true,
-                    colorByPoint: false
+                    showInLegend: false,
+                    colorByPoint: true
                 }
             }
         },
-        calculatorType: 'BarCalculator'
+        calculatorType: 'ColumnCalculator'
     },
 
     constructor: function(config) {
         config = config || {};
         this.mergeConfig(config);
 
-        this.chartConfig.plotOptions.bar.showInLegend = this.enableStacking;
-        this.chartConfig.plotOptions.bar.colorByPoint = !this.enableStacking;
-
+        this.chartConfig.plotOptions.column.showInLegend = this.enableStacking;
+        this.chartConfig.plotOptions.column.colorByPoint = !this.enableStacking;
+        
         if (!this.enableStacking) {
             this.chartConfig.tooltip = {
                 headerFormat: '',
                 pointFormat: '{point.name}: <b>{point.y}</b>'
             };
         }
-
         this.callParent([this.config]);
     }
 });
