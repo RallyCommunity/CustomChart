@@ -10,6 +10,15 @@ This app is the chart equivalent of the Custom Board and Custom List apps.  Pick
 The app is installed as a Custom HTML App ([see help documentation](https://help.rallydev.com/custom-html))
 Once the app is installed, use the gear menu on the app panel and select "Edit App Settings". There are a few settings you can configure for each chart type.
 
+If this app is on a Timebox Scoped page, then the appropriate timebox filter
+will be applied if the Timebox is valid for the queried model.  If the Timebox
+is not valid for the selected model, then the Timebox scope will be ignored.
+
+If the page is scoped to a Milestone Timebox, there is an additional setting
+to allow the user to respect or ignore the global project setting. This is
+useful when Portfolio Items associated with a specific Milestone are not
+constrained to a specific subset of the Project Hierarchy tree.
+
 ![custom chart settings screenshot](images/CustomChartSettings.png "Custom Chart Settings Screenshot")
 
 #### Chart Type
