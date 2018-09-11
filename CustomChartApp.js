@@ -12,7 +12,8 @@ Ext.define('CustomChartApp', {
             aggregationType: 'count',
             bucketBy: '',
             stackField: '',
-            query: ''
+            query: '',
+            searchAllProjects: [{checked: false}]
         }
     },
 
@@ -28,9 +29,27 @@ Ext.define('CustomChartApp', {
             });
         }
     },
+    
+    isMilestoneScoped: function() {
+        var result = false;
+        
+        var tbscope = this.getContext().getTimeboxScope();
+        if (tbscope && tbscope.getType() == 'milestone') {
+            result = true;
+        }
+        return result
+    },
+    
+    searchAllProjects: function() {
+        var searchAllProjects = this.getSetting('searchAllProjects');
+        return this.isMilestoneScoped() && searchAllProjects;
+    },
 
     getSettingsFields: function() {
-       return Settings.getSettingsFields(this.getContext());
+       return Settings.getSettingsFields({
+           context: this.getContext(),
+           showSearchAllProjects: this.isMilestoneScoped()
+       });
     },
 
     _shouldLoadAllowedStackValues: function(stackingField) {
@@ -63,8 +82,12 @@ Ext.define('CustomChartApp', {
     },
 
     _addChart: function() {
-        var context = this.getContext(),
-            whiteListFields = ['Milestones', 'Tags'],
+        var context = this.getContext();
+        var dataContext = context.getDataContext();
+        if (this.searchAllProjects()) {
+            dataContext.project = null;
+        }
+        var whiteListFields = ['Milestones', 'Tags'],
             modelNames = _.pluck(this.models, 'typePath'),
             gridBoardConfig = {
                 xtype: 'rallygridboard',
@@ -116,7 +139,8 @@ Ext.define('CustomChartApp', {
                 context: context,
                 modelNames: modelNames,
                 storeConfig: {
-                    filters: this._getFilters()
+                    filters: this._getFilters(),
+                    context: dataContext
                 }
             };
 
