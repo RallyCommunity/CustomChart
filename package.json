@@ -1,14 +1,32 @@
 {
-  "name":"MyApp",
-  "version":"0.1.1",
-  "private": true,
-  "devDependencies":{
-      "grunt":"~0.4.5",
-      "grunt-cli": "~0.1.9",
-      "grunt-contrib-jasmine":"0.4.x",
-      "grunt-contrib-jshint": "~0.7.2"
-  },
+  "name":"CustomChart",
+  "version":"1.2.8",
   "scripts": {
-    "test": "grunt"
+    "test": "grunt",
+    "debug": "grunt debug",
+    "debug:watch": "nodemon --exec grunt debug",
+    "deploy:watch": "nodemon --exec grunt deploy",
+    "deploy-pretty:watch": "nodemon --exec grunt deploy-pretty",
+    "deploy-debugsdk:watch": "nodemon --exec grunt deploy-debugsdk"
+  },
+  "devDependencies":{
+    "grunt": "~0.4.5",
+    "grunt-cli": "0.1.6",
+    "grunt-contrib-jasmine": "1.1.0",
+    "grunt-templater": "git://github.com/rockwood/grunt-templater.git",
+    "underscore": "1.8.3",
+    "grunt-prompt": "^1.3.3",
+    "grunt-contrib-uglify": "0.3.2",
+    "request": "2.67",
+    "grunt-contrib-watch": "1.0.0",
+    "username": "2.1.0",
+    "rally-sdk2-test-utils": "0.1.2",
+    "nodemon": "^1.14.11"
+  },
+  "nodemonConfig": {
+    "watch": [
+      "src/*", "templates/*"
+    ],
+    "verbose": true
   }
 }

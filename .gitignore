@@ -9,3 +9,4 @@ App-local.html
 .c9revisions
 node_modules
 .DS_Store
+auth.json
