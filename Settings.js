@@ -1,8 +1,18 @@
 Ext.define('Settings', {
     singleton: true,
 
-    getSettingsFields: function(context) {
+    getSettingsFields: function(config) {
          return [
+            {
+              id:'searchAllProjects',
+              name:'searchAllProjects',
+              fieldLabel: 'Scope Across Workspace',
+              labelAlign: 'left',
+              xtype:'rallycheckboxfield',
+              labelWidth: 150,
+              margin: 10,
+              hidden: !config.showSearchAllProjects
+            },
             {
                 name: 'chartType',
                 xtype: 'rallycombobox',
@@ -44,7 +54,7 @@ Ext.define('Settings', {
                 fieldLabel: 'Type', //todo: delete when multiselect enabled
                 // multiSelect: true, //todo: need to validate either all artifacts chosen or only one non-artifact
                 shouldRespondToScopeChange: true,
-                context: context,
+                context: config.context,
                 // initialValue: ['HierarchicalRequirement'], //todo: not working
                 storeConfig: {
                     model: 'TypeDefinition',

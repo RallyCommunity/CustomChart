@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title><%= pkg.name %>-<%= pkg.version %></title>
+    <!--  (c) 2017 CA Technologies.  All Rights Reserved. -->
+    <!--  Build Date: <%= new Date() %> -->
+
+    <script type="text/javascript">
+        var APP_BUILD_DATE = "<%= new Date() %>";
+        var CHECKSUM = [%= checksum %];
+    </script>
+
+    <script type="text/javascript" src="/apps/<%= sdk %>/sdk.js"></script>
+    <!-- our highcharts (needed so that we can add patterns)
+    <script type="text/javascript" src="/apps/<%= sdk %>/lib/analytics/analytics-all.js"></script>
+    -->
+
+
+    <script type="text/javascript">
+        Rally.onReady(function() {
+            <%= ugly_contents %>
+
+               Rally.launchApp('<%= className %>', {
+                   name: '<%= pkg.name %>'
+               });
+        });
+    </script>
+
+    <style type="text/css">
+<%= style_contents %>
+    </style>
+
+</head>
+<body></body>
+</html>
